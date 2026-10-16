@@ -17,6 +17,7 @@
 indicator("Session Sweep Model [Signals]", shorttitle = "Session Sweep", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
 
 // ───── Constants ─────────────────────────────────────────────────────────────
+const string VERSION = "1.0.0" // x-release-please-version
 const string TZ     = "Africa/Johannesburg"
 const string P_AUTO = "Auto-detect"
 const string P_FX   = "Forex"
@@ -451,7 +452,7 @@ if showStats and barstate.islast
     float  wr     = nTrades > 0 ? nWins * 100.0 / nTrades : 0.0
     float  avgR   = nTrades > 0 ? sumR / nTrades : 0.0
     table.cell(tb, 0, 0, "SESSION SWEEP MODEL", text_color = color.white, text_size = size.small, text_halign = text.align_left)
-    table.cell(tb, 1, 0, "v1.0", text_color = C_MUTED, text_size = size.small, text_halign = text.align_right)
+    table.cell(tb, 1, 0, "v" + VERSION, text_color = C_MUTED, text_size = size.small, text_halign = text.align_right)
     row(tb, 1, "Profile", profName + (useLon and useNy ? " · London + NY" : useLon ? " · London" : " · New York"), color.white)
     row(tb, 2, "Entry", entryMode, color.white)
     row(tb, 3, "Now", winTxt, color.white)
