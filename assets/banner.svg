@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" width="900" height="260" role="img" aria-label="Session Sweep Model: liquidity sweep and break of structure indicator">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1426"/>
+      <stop offset="1" stop-color="#14213D"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#9DB4E0"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="260" rx="16" fill="url(#bg)"/>
+
+  <!-- grid -->
+  <g stroke="#2A3A5E" stroke-width="1" opacity="0.5">
+    <line x1="0" y1="65" x2="900" y2="65"/>
+    <line x1="0" y1="130" x2="900" y2="130"/>
+    <line x1="0" y1="195" x2="900" y2="195"/>
+  </g>
+
+  <!-- asian range -->
+  <rect x="40" y="120" width="360" height="80" fill="#5B7DB1" opacity="0.12"/>
+  <line x1="40" y1="120" x2="860" y2="120" stroke="#5B7DB1" stroke-width="1.5" stroke-dasharray="6 5">
+    <animate attributeName="stroke-dashoffset" from="0" to="-22" dur="1.2s" repeatCount="indefinite"/>
+  </line>
+  <text x="48" y="114" fill="#5B7DB1" font-family="Segoe UI, Arial, sans-serif" font-size="11">Asian high</text>
+
+  <!-- candles -->
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g stroke-width="2">
+      <line x1="90" y1="135" x2="90" y2="190" stroke="#8A94A6"/><rect x="82" y="148" width="16" height="30" fill="#8A94A6"/>
+      <line x1="140" y1="130" x2="140" y2="185" stroke="#8A94A6"/><rect x="132" y="140" width="16" height="32" fill="#8A94A6"/>
+      <line x1="190" y1="135" x2="190" y2="195" stroke="#8A94A6"/><rect x="182" y="150" width="16" height="34" fill="#8A94A6"/>
+      <line x1="240" y1="128" x2="240" y2="180" stroke="#8A94A6"/><rect x="232" y="138" width="16" height="30" fill="#8A94A6"/>
+      <line x1="290" y1="125" x2="290" y2="178" stroke="#8A94A6"/><rect x="282" y="135" width="16" height="30" fill="#8A94A6"/>
+    </g>
+    <!-- sweep candle: wick pokes above range then reclaims -->
+    <line x1="350" y1="70" x2="350" y2="150" stroke="#E07A00" stroke-width="2"/>
+    <rect x="342" y="125" width="16" height="22" fill="#2E7D32"/>
+    <circle cx="350" cy="70" r="6" fill="#E07A00">
+      <animate attributeName="r" values="5;11;5" dur="1.8s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;0.3;1" dur="1.8s" repeatCount="indefinite"/>
+    </circle>
+    <text x="362" y="66" fill="#E07A00" font-size="12" font-weight="700">SWEEP</text>
+    <!-- BOS candle: breaks down -->
+    <line x1="400" y1="118" x2="400" y2="205" stroke="#C62828" stroke-width="2"/>
+    <rect x="392" y="128" width="16" height="62" fill="#C62828"/>
+    <line x1="260" y1="170" x2="470" y2="170" stroke="#C62828" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <text x="414" y="164" fill="#C62828" font-size="12" font-weight="700">BOS</text>
+    <!-- follow through -->
+    <line x1="450" y1="150" x2="450" y2="225" stroke="#C62828" stroke-width="2"/><rect x="442" y="165" width="16" height="45" fill="#C62828"/>
+    <line x1="500" y1="170" x2="500" y2="235" stroke="#C62828" stroke-width="2"/><rect x="492" y="182" width="16" height="42" fill="#C62828"/>
+  </g>
+
+  <!-- take profit line pulsing -->
+  <line x1="470" y1="228" x2="860" y2="228" stroke="#2E7D32" stroke-width="2">
+    <animate attributeName="opacity" values="1;0.35;1" dur="2.4s" repeatCount="indefinite"/>
+  </line>
+  <text x="780" y="222" fill="#2E7D32" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700">TP 2R</text>
+
+  <!-- moving price dot -->
+  <circle r="5" fill="#FFFFFF">
+    <animateMotion dur="5s" repeatCount="indefinite" path="M 90 165 L 140 156 L 190 167 L 240 153 L 290 150 L 350 70 L 400 160 L 450 188 L 500 203"/>
+  </circle>
+
+  <!-- title -->
+  <text x="540" y="95" fill="url(#title)" font-family="Segoe UI, Arial, sans-serif" font-size="40" font-weight="800">Session Sweep</text>
+  <text x="540" y="128" fill="url(#title)" font-family="Segoe UI, Arial, sans-serif" font-size="40" font-weight="800">Model</text>
+  <text x="541" y="156" fill="#9DB4E0" font-family="Segoe UI, Arial, sans-serif" font-size="14">Liquidity sweep + break of structure</text>
+  <text x="541" y="178" fill="#9DB4E0" font-family="Segoe UI, Arial, sans-serif" font-size="14">TradingView · Pine Script v6 · M5</text>
+</svg>

@@ -268,7 +268,7 @@ if tState != 0 and bar_index > tSigBar
             tState := 2
             line.set_style(lnE, line.style_solid)
             if sendUpdates
-                alert(wrapMsg("✅ FILLED: " + tType + " " + syminfo.ticker + " @ " + fp(tEntry) + NL + "SL " + fp(tSL) + " | TP " + fp(tTP)), alert.freq_once_per_bar_close)
+                alert(wrapMsg("FILLED: " + tType + " " + syminfo.ticker + " @ " + fp(tEntry) + NL + "SL " + fp(tSL) + " | TP " + fp(tTP)), alert.freq_once_per_bar_close)
         else if tpRun
             reason := "Cancelled: TP reached before entry"
     if tState == 2 and reason == ""
@@ -294,8 +294,7 @@ if tState != 0 and bar_index > tSigBar
             maxDD   := math.max(maxDD, peakR - sumR)
             label.new(bar_index, exitPx, reason + " " + fmtR(r), style = label.style_label_left, color = r > 0 ? C_BUY : r < 0 ? C_SELL : C_MUTED, textcolor = color.white, size = size.small)
             if sendUpdates
-                string icon = reason == "TP hit" ? "🎯 " : reason == "SL hit" ? "❌ " : "⏰ "
-                alert(wrapMsg(icon + str.upper(reason) + ": " + tType + " " + syminfo.ticker + NL + "Exit " + fp(exitPx) + " | Result " + fmtR(r)), alert.freq_once_per_bar_close)
+                alert(wrapMsg(str.upper(reason) + ": " + tType + " " + syminfo.ticker + NL + "Exit " + fp(exitPx) + " | Result " + fmtR(r)), alert.freq_once_per_bar_close)
         else
             nCancel := nCancel + 1
             box.delete(bxRisk)
@@ -305,7 +304,7 @@ if tState != 0 and bar_index > tSigBar
             if showSkips
                 label.new(bar_index, tEntry, reason, style = label.style_label_left, color = C_MUTED, textcolor = color.white, size = size.tiny)
             if sendUpdates
-                alert(wrapMsg("🚫 " + str.upper(reason) + NL + tType + " " + syminfo.ticker + " @ " + fp(tEntry)), alert.freq_once_per_bar_close)
+                alert(wrapMsg("" + str.upper(reason) + NL + tType + " " + syminfo.ticker + " @ " + fp(tEntry)), alert.freq_once_per_bar_close)
         tState := 0
     else
         extendTrade(lnE, lnS, lnT, bxRisk, bxRew, lbE, lbS, lbT, bar_index + 3)
@@ -413,7 +412,7 @@ if sigS != sigL
 
         // Signal message
         int    expT = math.min(time_close + pendingBars * timeframe.in_seconds() * 1000, winEndT)
-        string body = (dir == 1 ? "🟢 " : "🔴 ") + tType + " " + syminfo.ticker + NL + NL + "Entry: " + fp(entry) + NL + "SL: " + fp(sl) + NL + "TP: " + fp(tp) + NL + NL + "Risk: " + fmtRisk(risk) + " | RR 1:" + str.tostring(rr, "#.##") + NL + "Session: " + (winNow == 1 ? "London" : "New York")
+        string body = tType + " " + syminfo.ticker + NL + NL + "Entry: " + fp(entry) + NL + "SL: " + fp(sl) + NL + "TP: " + fp(tp) + NL + NL + "Risk: " + fmtRisk(risk) + " | RR 1:" + str.tostring(rr, "#.##") + NL + "Session: " + (winNow == 1 ? "London" : "New York")
         if not isMarket
             body := body + NL + "Valid until " + str.format_time(expT, "HH:mm", TZ) + " SAST (cancelled if TP is reached first)"
         body := body + NL + "Closed by " + str.format_time(tHard, "HH:mm", TZ) + " SAST if still open"
@@ -462,4 +461,4 @@ if showStats and barstate.islast
     row(tb, 7, "Total / avg", fmtR(sumR) + " / " + fmtR(avgR), sumR >= 0 ? color.lime : color.red)
     row(tb, 8, "Max drawdown", "-" + str.tostring(maxDD, "#.##") + "R", color.orange)
     row(tb, 9, "Cancelled / skipped", str.tostring(nCancel) + " / " + str.tostring(nSkip), color.white)
-    row(tb, 10, "Timeframe", tfOk ? "M5 ✓" : "Switch to M5", tfOk ? color.lime : color.red)
+    row(tb, 10, "Timeframe", tfOk ? "M5 OK" : "Switch to M5", tfOk ? color.lime : color.red)
