@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 140" width="900" height="140" role="img" aria-label="Flow: range, sweep, reclaim, break of structure, trade">
+  <rect width="900" height="140" rx="14" fill="#0B1426"/>
+  <line x1="90" y1="70" x2="810" y2="70" stroke="#2A3A5E" stroke-width="3"/>
+  <g font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">
+    <g>
+      <circle cx="90" cy="70" r="28" fill="#5B7DB1"/>
+      <text x="90" y="77" font-size="22" fill="#fff">1</text>
+      <text x="90" y="120" font-size="13" fill="#C9D3E3">Range</text>
+    </g>
+    <g>
+      <circle cx="270" cy="70" r="28" fill="#E07A00"/>
+      <text x="270" y="77" font-size="22" fill="#fff">2</text>
+      <text x="270" y="120" font-size="13" fill="#C9D3E3">Sweep</text>
+    </g>
+    <g>
+      <circle cx="450" cy="70" r="28" fill="#B07D2B"/>
+      <text x="450" y="77" font-size="22" fill="#fff">3</text>
+      <text x="450" y="120" font-size="13" fill="#C9D3E3">Reclaim</text>
+    </g>
+    <g>
+      <circle cx="630" cy="70" r="28" fill="#C62828"/>
+      <text x="630" y="77" font-size="22" fill="#fff">4</text>
+      <text x="630" y="120" font-size="13" fill="#C9D3E3">BOS</text>
+    </g>
+    <g>
+      <circle cx="810" cy="70" r="28" fill="#2E7D32"/>
+      <text x="810" y="77" font-size="22" fill="#fff">5</text>
+      <text x="810" y="120" font-size="13" fill="#C9D3E3">Trade</text>
+    </g>
+  </g>
+  <circle r="7" fill="#FFFFFF" cy="70">
+    <animate attributeName="cx" values="90;270;450;630;810;810" keyTimes="0;0.2;0.4;0.6;0.8;1" dur="6s" repeatCount="indefinite"/>
+  </circle>
+</svg>
