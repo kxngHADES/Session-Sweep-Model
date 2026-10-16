@@ -4,8 +4,6 @@ All notable changes to this indicator are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
 ## [1.0.0] - 2026-10-16
 
 ### Added
