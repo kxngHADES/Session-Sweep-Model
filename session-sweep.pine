@@ -1,0 +1,464 @@
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+// SESSION SWEEP MODEL  ·  Liquidity sweep + break of structure  ·  Rulebook v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Use on the M5 chart. Session times are calculated in their home time zones,
+// so daylight-saving changes in London and New York are handled automatically.
+//
+//   Asian range      02:00 SAST  → London open (08:00 London)
+//   London window    08:00 – 11:00 London      (Forex, Gold)   ref = Asian range
+//   London range     08:00 London → NY open (09:30 New York)
+//   New York window  09:30 – 11:30 New York    (Gold, NAS100)  ref = London range
+//   Hard close       22:00 SAST: every trade is closed, pending orders cancelled
+//
+// Not automated (check by hand before posting): high-impact news, spread,
+// firm-wide loss limits, and the EURUSD/GBPUSD "first pair only" rule.
+// ─────────────────────────────────────────────────────────────────────────────
+indicator("Session Sweep Model [Signals]", shorttitle = "Session Sweep", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+
+// ───── Constants ─────────────────────────────────────────────────────────────
+const string TZ     = "Africa/Johannesburg"
+const string P_AUTO = "Auto-detect"
+const string P_FX   = "Forex"
+const string P_GOLD = "Gold (XAUUSD)"
+const string P_NAS  = "NAS100"
+const string M_MKT  = "Market (rulebook)"
+const string M_LMT  = "Limit: retest of BOS level"
+const string M_STP  = "Stop: break of BOS candle"
+const string F_TXT  = "Plain text"
+const string F_TG   = "Telegram JSON (webhook)"
+
+color C_BUY   = color.new(#2E7D32, 0)
+color C_SELL  = color.new(#C62828, 0)
+color C_ENTRY = color.new(#5F6B7A, 0)
+color C_ASIA  = color.new(#5B7DB1, 0)
+color C_LON   = color.new(#B07D2B, 0)
+color C_SWEEP = color.new(#E07A00, 0)
+color C_MUTED = color.new(#8A94A6, 0)
+
+// ───── Inputs ────────────────────────────────────────────────────────────────
+const string G1 = "Strategy"
+profileIn   = input.string(P_AUTO, "Instrument profile", options = [P_AUTO, P_FX, P_GOLD, P_NAS], group = G1, tooltip = "Auto-detect reads the symbol name (XAU/GOLD = Gold, NAS/US100/USTEC/NDX = NAS100, anything else = Forex). Override it if your broker uses an unusual name.")
+entryMode   = input.string(M_MKT, "Entry type", options = [M_MKT, M_LMT, M_STP], group = G1, tooltip = "Market: enter at the BOS candle close (the rulebook default).\nLimit: pending BUY/SELL LIMIT back at the broken swing level.\nStop: pending BUY/SELL STOP beyond the BOS candle's high/low.")
+rr          = input.float(2.0, "Reward : Risk", minval = 0.5, step = 0.25, group = G1)
+pendingBars = input.int(6, "Pending order expiry (candles)", minval = 1, group = G1, tooltip = "Limit/Stop orders are cancelled after this many candles, at the end of the trading window, or if price reaches TP before the entry fills.")
+atrMult     = input.float(3.0, "Max stop size (x ATR 14)", minval = 0.5, step = 0.5, group = G1)
+reclaimN    = input.int(4, "Reclaim within (candles, incl. sweep candle)", minval = 1, group = G1)
+bosN        = input.int(12, "BOS within (candles of sweep extreme)", minval = 1, group = G1)
+hardH       = input.int(22, "Hard close hour (SAST)", minval = 0, maxval = 23, group = G1)
+
+const string G2 = "Stop buffers"
+fxBufPips = input.float(2.0, "Forex buffer (pips)", minval = 0, group = G2)
+goldBuf   = input.float(1.0, "Gold buffer ($)", minval = 0, group = G2)
+nasBuf    = input.float(10.0, "NAS100 buffer (points)", minval = 0, group = G2)
+
+const string G3 = "Display"
+showRanges = input.bool(true, "Ranges, reference levels and hard-close line", group = G3)
+showWinBg  = input.bool(true, "Shade trading windows", group = G3)
+showMarks  = input.bool(true, "Sweep and BOS markings", group = G3)
+showSwings = input.bool(false, "Swing points (fractals)", group = G3)
+showSkips  = input.bool(true, "Skipped and cancelled setups", group = G3)
+showStats  = input.bool(true, "Stats panel", group = G3)
+
+const string G4 = "Signal alerts"
+alertFmt    = input.string(F_TXT, "Alert message format", options = [F_TXT, F_TG], group = G4, tooltip = "Telegram JSON: set the alert's webhook URL to https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendMessage and the message is posted straight to your channel.")
+chatId      = input.string("", "Telegram chat ID (e.g. @yourchannel)", group = G4)
+tagTxt      = input.string("", "Footer line (e.g. channel name)", group = G4, tooltip = "Avoid double quotes when using Telegram JSON.")
+sendUpdates = input.bool(true, "Send trade updates (fill, TP, SL, cancel, 22:00 close)", group = G4)
+
+// ───── Instrument profile ────────────────────────────────────────────────────
+string tk       = str.upper(syminfo.ticker)
+bool   autoGold = str.contains(tk, "XAU") or str.contains(tk, "GOLD")
+bool   autoNas  = str.contains(tk, "NAS") or str.contains(tk, "NDX") or str.contains(tk, "US100") or str.contains(tk, "USTEC") or str.contains(tk, "NQ")
+int    prof     = profileIn == P_FX ? 0 : profileIn == P_GOLD ? 1 : profileIn == P_NAS ? 2 : autoGold ? 1 : autoNas ? 2 : 0
+string profName = prof == 0 ? "Forex" : prof == 1 ? "Gold" : "NAS100"
+bool   useLon   = prof != 2          // Forex + Gold trade London
+bool   useNy    = prof != 0          // Gold + NAS100 trade New York
+float  pip      = syminfo.mintick * 10
+float  buf      = prof == 0 ? fxBufPips * pip : prof == 1 ? goldBuf : nasBuf
+bool   isMarket = entryMode == M_MKT
+bool   isLimit  = entryMode == M_LMT
+string NL       = alertFmt == F_TG ? "\\n" : "\n"
+
+// ───── Helpers ───────────────────────────────────────────────────────────────
+fp(float x) =>
+    str.tostring(x, format.mintick)
+
+fmtRisk(float d) =>
+    prof == 0 ? str.tostring(d / pip, "#.0") + " pips" : prof == 1 ? "$" + str.tostring(d, "#.00") : str.tostring(d, "#.0") + " pts"
+
+fmtR(float r) =>
+    (r >= 0 ? "+" : "") + str.tostring(r, "#.##") + "R"
+
+wrapMsg(string body) =>
+    string b = tagTxt != "" ? body + NL + NL + tagTxt : body
+    alertFmt == F_TG ? '{"chat_id":"' + chatId + '","text":"' + b + '"}' : b
+
+extendTrade(line a, line b, line c, box d, box e, label f, label g, label h, int x) =>
+    line.set_x2(a, x)
+    line.set_x2(b, x)
+    line.set_x2(c, x)
+    box.set_right(d, x)
+    box.set_right(e, x)
+    label.set_x(f, x)
+    label.set_x(g, x)
+    label.set_x(h, x)
+
+// ───── Session clock (all derived from the SAST calendar date) ──────────────
+int yy         = year(time, TZ)
+int mm         = month(time, TZ)
+int dd         = dayofmonth(time, TZ)
+int dayKey     = yy * 10000 + mm * 100 + dd
+int tAsiaStart = timestamp(TZ, yy, mm, dd, 2, 0, 0)
+int tLonOpen   = timestamp("Europe/London", yy, mm, dd, 8, 0, 0)
+int tLonWinEnd = timestamp("Europe/London", yy, mm, dd, 11, 0, 0)
+int tNyOpen    = timestamp("America/New_York", yy, mm, dd, 9, 30, 0)
+int tNyWinEnd  = timestamp("America/New_York", yy, mm, dd, 11, 30, 0)
+int tHard      = timestamp(TZ, yy, mm, dd, hardH, 0, 0)
+
+bool inAsia     = time >= tAsiaStart and time < tLonOpen
+bool inLonRange = time >= tLonOpen and time < tNyOpen
+bool inLonWin   = time >= tLonOpen and time < tLonWinEnd
+bool inNyWin    = time >= tNyOpen and time < tNyWinEnd
+int  winNow     = useLon and inLonWin ? 1 : useNy and inNyWin ? 2 : 0
+
+// ───── Indicators (called every bar) ─────────────────────────────────────────
+float atr14 = ta.atr(14)
+float pl    = ta.pivotlow(low, 2, 2)
+float ph    = ta.pivothigh(high, 2, 2)
+
+var float lastSwingLow     = na
+var int   lastSwingLowBar  = na
+var float lastSwingHigh    = na
+var int   lastSwingHighBar = na
+
+// ───── Reference ranges ──────────────────────────────────────────────────────
+var float asiaHi  = na
+var float asiaLo  = na
+var int   asiaDay = 0
+var box   asiaBox = na
+if inAsia
+    if asiaDay != dayKey
+        asiaDay := dayKey
+        asiaHi  := high
+        asiaLo  := low
+        asiaBox := showRanges ? box.new(bar_index, high, bar_index, low, border_color = color.new(C_ASIA, 50), bgcolor = color.new(C_ASIA, 90), text = "Asian range", text_size = size.tiny, text_color = C_ASIA, text_halign = text.align_left, text_valign = text.align_top) : na
+    else
+        asiaHi := math.max(asiaHi, high)
+        asiaLo := math.min(asiaLo, low)
+        if not na(asiaBox)
+            box.set_top(asiaBox, asiaHi)
+            box.set_bottom(asiaBox, asiaLo)
+            box.set_right(asiaBox, bar_index)
+
+var float lonHi  = na
+var float lonLo  = na
+var int   lonDay = 0
+var box   lonBox = na
+if inLonRange and useNy
+    if lonDay != dayKey
+        lonDay := dayKey
+        lonHi  := high
+        lonLo  := low
+        lonBox := showRanges ? box.new(bar_index, high, bar_index, low, border_color = color.new(C_LON, 60), bgcolor = color.new(C_LON, 93), text = "London range", text_size = size.tiny, text_color = C_LON, text_halign = text.align_left, text_valign = text.align_top) : na
+    else
+        lonHi := math.max(lonHi, high)
+        lonLo := math.min(lonLo, low)
+        if not na(lonBox)
+            box.set_top(lonBox, lonHi)
+            box.set_bottom(lonBox, lonLo)
+            box.set_right(lonBox, bar_index)
+
+// ───── Setup state for each side of the range ───────────────────────────────
+type Side
+    bool  swept      = false
+    bool  reclaimed  = false
+    bool  dead       = false
+    int   outCount   = 0
+    float extreme    = na
+    int   extremeBar = na
+    float bosLevel   = na
+    int   bosBar     = na
+    label sweepLbl   = na
+
+// dir = -1: sweep of the HIGH → short setup · dir = 1: sweep of the LOW → long setup
+processSide(Side s, int dir, float ref, float swingLvl, int swingBar) =>
+    bool sig = false
+    if not s.dead
+        bool beyond = dir == -1 ? high > ref : low < ref
+        bool inside = dir == -1 ? close < ref : close > ref
+        if not s.swept
+            if beyond
+                s.swept      := true
+                s.extreme    := dir == -1 ? high : low
+                s.extremeBar := bar_index
+                s.bosLevel   := swingLvl
+                s.bosBar     := swingBar
+                s.reclaimed  := inside
+                s.outCount   := inside ? 0 : 1
+                if na(swingLvl)
+                    s.dead := true
+        else
+            bool further = dir == -1 ? high > s.extreme : low < s.extreme
+            if further
+                s.extreme    := dir == -1 ? high : low
+                s.extremeBar := bar_index
+            if not s.reclaimed
+                if inside
+                    s.reclaimed := true
+                else
+                    s.outCount := s.outCount + 1
+                    if s.outCount >= reclaimN
+                        s.dead := true
+        if s.swept and s.reclaimed and not s.dead
+            if showMarks
+                if na(s.sweepLbl)
+                    s.sweepLbl := label.new(s.extremeBar, s.extreme, "SWEEP", style = dir == -1 ? label.style_label_down : label.style_label_up, color = C_SWEEP, textcolor = color.white, size = size.tiny)
+                else
+                    label.set_xy(s.sweepLbl, s.extremeBar, s.extreme)
+            bool bos = dir == -1 ? close < s.bosLevel : close > s.bosLevel
+            if bos
+                sig := true
+            else if bar_index - s.extremeBar >= bosN
+                s.dead := true
+    sig
+
+// ───── Trade state ───────────────────────────────────────────────────────────
+var int    tState     = 0      // 0 flat · 1 pending · 2 open
+var int    tDir       = 0
+var bool   tIsLimit   = false
+var float  tEntry     = na
+var float  tSL        = na
+var float  tTP        = na
+var float  tRisk      = na
+var int    tSigBar    = na
+var int    tExpireBar = na
+var int    tWinEnd    = na
+var int    tCloseAt   = na
+var string tType      = ""
+var line   lnE        = na
+var line   lnS        = na
+var line   lnT        = na
+var box    bxRisk     = na
+var box    bxRew      = na
+var label  lbE        = na
+var label  lbS        = na
+var label  lbT        = na
+
+// Stats (simulated on chart history)
+var int   nTrades = 0
+var int   nWins   = 0
+var int   nCancel = 0
+var int   nSkip   = 0
+var float sumR    = 0.0
+var float peakR   = 0.0
+var float maxDD   = 0.0
+
+// ───── 1) Manage the open / pending trade ────────────────────────────────────
+if tState != 0 and bar_index > tSigBar
+    string reason = ""
+    float  exitPx = na
+    if tState == 1
+        bool fill  = tIsLimit ? (tDir == -1 ? high >= tEntry : low <= tEntry) : (tDir == -1 ? low <= tEntry : high >= tEntry)
+        bool tpRun = tDir == -1 ? low <= tTP : high >= tTP
+        if time >= tWinEnd or bar_index > tExpireBar
+            reason := "Cancelled: not filled in time"
+        else if fill
+            tState := 2
+            line.set_style(lnE, line.style_solid)
+            if sendUpdates
+                alert(wrapMsg("✅ FILLED: " + tType + " " + syminfo.ticker + " @ " + fp(tEntry) + NL + "SL " + fp(tSL) + " | TP " + fp(tTP)), alert.freq_once_per_bar_close)
+        else if tpRun
+            reason := "Cancelled: TP reached before entry"
+    if tState == 2 and reason == ""
+        bool slHit = tDir == -1 ? high >= tSL : low <= tSL
+        bool tpHit = tDir == -1 ? low <= tTP : high >= tTP
+        if time >= tCloseAt
+            reason := "Closed at " + str.tostring(hardH) + ":00"
+            exitPx := open
+        else if slHit                      // conservative: SL wins if both hit in one candle
+            reason := "SL hit"
+            exitPx := tSL
+        else if tpHit
+            reason := "TP hit"
+            exitPx := tTP
+    if reason != ""
+        extendTrade(lnE, lnS, lnT, bxRisk, bxRew, lbE, lbS, lbT, bar_index)
+        if not na(exitPx)
+            float r = tDir * (exitPx - tEntry) / tRisk
+            nTrades := nTrades + 1
+            nWins   := r > 0 ? nWins + 1 : nWins
+            sumR    := sumR + r
+            peakR   := math.max(peakR, sumR)
+            maxDD   := math.max(maxDD, peakR - sumR)
+            label.new(bar_index, exitPx, reason + " " + fmtR(r), style = label.style_label_left, color = r > 0 ? C_BUY : r < 0 ? C_SELL : C_MUTED, textcolor = color.white, size = size.small)
+            if sendUpdates
+                string icon = reason == "TP hit" ? "🎯 " : reason == "SL hit" ? "❌ " : "⏰ "
+                alert(wrapMsg(icon + str.upper(reason) + ": " + tType + " " + syminfo.ticker + NL + "Exit " + fp(exitPx) + " | Result " + fmtR(r)), alert.freq_once_per_bar_close)
+        else
+            nCancel := nCancel + 1
+            box.delete(bxRisk)
+            box.delete(bxRew)
+            line.set_color(lnS, color.new(C_MUTED, 40))
+            line.set_color(lnT, color.new(C_MUTED, 40))
+            if showSkips
+                label.new(bar_index, tEntry, reason, style = label.style_label_left, color = C_MUTED, textcolor = color.white, size = size.tiny)
+            if sendUpdates
+                alert(wrapMsg("🚫 " + str.upper(reason) + NL + tType + " " + syminfo.ticker + " @ " + fp(tEntry)), alert.freq_once_per_bar_close)
+        tState := 0
+    else
+        extendTrade(lnE, lnS, lnT, bxRisk, bxRew, lbE, lbS, lbT, bar_index + 3)
+
+// ───── 2) Trading window: look for sweep → reclaim → BOS ─────────────────────
+var int   winKey     = 0
+var float refHi      = na
+var float refLo      = na
+var bool  windowDone = true
+var int   winEndT    = na
+var Side  hiS        = Side.new()
+var Side  loS        = Side.new()
+var line  refHiLn    = na
+var line  refLoLn    = na
+
+bool newWindow = winNow != 0 and dayKey * 10 + winNow != winKey
+if newWindow
+    winKey     := dayKey * 10 + winNow
+    bool refOk  = winNow == 1 ? asiaDay == dayKey : lonDay == dayKey
+    refHi      := winNow == 1 ? asiaHi : lonHi
+    refLo      := winNow == 1 ? asiaLo : lonLo
+    windowDone := not refOk or na(refHi) or na(refLo)
+    winEndT    := winNow == 1 ? tLonWinEnd : tNyWinEnd
+    hiS        := Side.new()
+    loS        := Side.new()
+    refHiLn    := na
+    refLoLn    := na
+    if showRanges and not windowDone
+        color rc = winNow == 1 ? C_ASIA : C_LON
+        string rn = winNow == 1 ? "Asian" : "London"
+        refHiLn := line.new(bar_index, refHi, bar_index, refHi, color = rc, style = line.style_dashed, width = 1)
+        refLoLn := line.new(bar_index, refLo, bar_index, refLo, color = rc, style = line.style_dashed, width = 1)
+        label.new(bar_index, refHi, rn + " high", style = label.style_label_lower_left, color = color.new(rc, 100), textcolor = rc, size = size.tiny)
+        label.new(bar_index, refLo, rn + " low", style = label.style_label_upper_left, color = color.new(rc, 100), textcolor = rc, size = size.tiny)
+else if winNow != 0 and not na(refHiLn)
+    line.set_x2(refHiLn, bar_index)
+    line.set_x2(refLoLn, bar_index)
+
+bool sigS    = false
+bool sigL    = false
+bool buySig  = false
+bool sellSig = false
+
+if winNow != 0 and not windowDone
+    sigS := processSide(hiS, -1, refHi, lastSwingLow, lastSwingLowBar)
+    sigL := processSide(loS, 1, refLo, lastSwingHigh, lastSwingHighBar)
+    if hiS.reclaimed and loS.reclaimed           // both sides swept: range unreliable
+        sigS       := false
+        sigL       := false
+        windowDone := true
+        if showSkips
+            label.new(bar_index, high, "Both sides swept: no trade", style = label.style_label_down, color = C_MUTED, textcolor = color.white, size = size.tiny)
+
+if sigS != sigL
+    int   dir   = sigL ? 1 : -1
+    Side  s     = sigL ? loS : hiS
+    windowDone := true
+    float sl    = dir == 1 ? s.extreme - buf : s.extreme + buf
+    float entry = isMarket ? close : isLimit ? s.bosLevel : (dir == 1 ? high : low)
+    float risk  = math.abs(entry - sl)
+    float tp    = entry + dir * rr * risk
+    color dc    = dir == 1 ? C_BUY : C_SELL
+
+    if showMarks
+        line.new(s.bosBar, s.bosLevel, bar_index, s.bosLevel, color = dc, style = line.style_dashed, width = 1)
+        label.new(math.round((s.bosBar + bar_index) / 2), s.bosLevel, "BOS", style = dir == 1 ? label.style_label_down : label.style_label_up, color = color.new(dc, 100), textcolor = dc, size = size.tiny)
+
+    if tState != 0
+        nSkip := nSkip + 1
+        if showSkips
+            label.new(bar_index, dir == 1 ? low : high, "Skipped: position already open", style = dir == 1 ? label.style_label_up : label.style_label_down, color = C_MUTED, textcolor = color.white, size = size.tiny)
+    else if risk > atrMult * atr14 or risk <= 0
+        nSkip := nSkip + 1
+        if showSkips
+            label.new(bar_index, dir == 1 ? low : high, "Skipped: stop > " + str.tostring(atrMult) + "x ATR", style = dir == 1 ? label.style_label_up : label.style_label_down, color = C_MUTED, textcolor = color.white, size = size.tiny)
+    else
+        tDir       := dir
+        tIsLimit   := isLimit
+        tEntry     := entry
+        tSL        := sl
+        tTP        := tp
+        tRisk      := risk
+        tSigBar    := bar_index
+        tExpireBar := bar_index + pendingBars
+        tWinEnd    := winEndT
+        tCloseAt   := tHard
+        tState     := isMarket ? 2 : 1
+        tType      := (dir == 1 ? "BUY" : "SELL") + (isMarket ? "" : isLimit ? " LIMIT" : " STOP")
+        buySig     := dir == 1
+        sellSig    := dir == -1
+
+        // Position drawing (like TradingView's long/short tool)
+        int x2  = bar_index + 3
+        bxRisk := box.new(bar_index, math.max(entry, sl), x2, math.min(entry, sl), border_color = color.new(C_SELL, 70), bgcolor = color.new(C_SELL, 85))
+        bxRew  := box.new(bar_index, math.max(entry, tp), x2, math.min(entry, tp), border_color = color.new(C_BUY, 70), bgcolor = color.new(C_BUY, 85))
+        lnE    := line.new(bar_index, entry, x2, entry, color = C_ENTRY, width = 2, style = isMarket ? line.style_solid : line.style_dashed)
+        lnS    := line.new(bar_index, sl, x2, sl, color = C_SELL, width = 2)
+        lnT    := line.new(bar_index, tp, x2, tp, color = C_BUY, width = 2)
+        lbE    := label.new(x2, entry, tType + "  " + fp(entry), style = label.style_label_left, color = C_ENTRY, textcolor = color.white, size = size.small)
+        lbS    := label.new(x2, sl, "SL  " + fp(sl), style = label.style_label_left, color = C_SELL, textcolor = color.white, size = size.small)
+        lbT    := label.new(x2, tp, "TP  " + fp(tp) + "  (" + str.tostring(rr, "#.##") + "R)", style = label.style_label_left, color = C_BUY, textcolor = color.white, size = size.small)
+
+        string sigTxt = tType + "\nEntry " + fp(entry) + "\nSL " + fp(sl) + "\nTP " + fp(tp) + "\nRisk " + fmtRisk(risk)
+        label.new(bar_index, dir == 1 ? low : high, sigTxt, style = dir == 1 ? label.style_label_up : label.style_label_down, color = dc, textcolor = color.white, size = size.small)
+
+        // Signal message
+        int    expT = math.min(time_close + pendingBars * timeframe.in_seconds() * 1000, winEndT)
+        string body = (dir == 1 ? "🟢 " : "🔴 ") + tType + " " + syminfo.ticker + NL + NL + "Entry: " + fp(entry) + NL + "SL: " + fp(sl) + NL + "TP: " + fp(tp) + NL + NL + "Risk: " + fmtRisk(risk) + " | RR 1:" + str.tostring(rr, "#.##") + NL + "Session: " + (winNow == 1 ? "London" : "New York")
+        if not isMarket
+            body := body + NL + "Valid until " + str.format_time(expT, "HH:mm", TZ) + " SAST (cancelled if TP is reached first)"
+        body := body + NL + "Closed by " + str.format_time(tHard, "HH:mm", TZ) + " SAST if still open"
+        alert(wrapMsg(body), alert.freq_once_per_bar_close)
+
+// ───── 3) Update swing points AFTER the setup check (only swings that existed) ─
+if not na(pl)
+    lastSwingLow    := pl
+    lastSwingLowBar := bar_index - 2
+if not na(ph)
+    lastSwingHigh    := ph
+    lastSwingHighBar := bar_index - 2
+
+// ───── Hard-close marker, window shading, swing markers ─────────────────────
+if showRanges and not na(time[1]) and time >= tHard and time[1] < tHard
+    line.new(bar_index, low, bar_index, high, extend = extend.both, color = color.new(C_MUTED, 50), style = line.style_dotted)
+
+bgcolor(showWinBg and winNow != 0 ? color.new(winNow == 1 ? C_ASIA : C_LON, 94) : na, title = "Trading window")
+plotshape(showSwings and not na(ph), "Swing high", shape.triangledown, location.abovebar, color.new(C_MUTED, 30), offset = -2, size = size.tiny)
+plotshape(showSwings and not na(pl), "Swing low", shape.triangleup, location.belowbar, color.new(C_MUTED, 30), offset = -2, size = size.tiny)
+
+// ───── Simple alert conditions (for users without alert() webhooks) ─────────
+alertcondition(buySig, "Session Sweep: BUY", "Session Sweep BUY signal on {{ticker}} at {{close}}")
+alertcondition(sellSig, "Session Sweep: SELL", "Session Sweep SELL signal on {{ticker}} at {{close}}")
+
+// ───── Stats panel ───────────────────────────────────────────────────────────
+row(table t, int r, string k, string v, color vc) =>
+    table.cell(t, 0, r, k, text_color = color.new(#C9D3E3, 0), text_size = size.small, text_halign = text.align_left)
+    table.cell(t, 1, r, v, text_color = vc, text_size = size.small, text_halign = text.align_right)
+
+var table tb = table.new(position.top_right, 2, 11, bgcolor = color.new(#14213D, 5), frame_color = color.new(#14213D, 0), frame_width = 1, border_color = color.new(#2A3A5E, 0), border_width = 1)
+if showStats and barstate.islast
+    bool   tfOk   = timeframe.in_seconds() == 300
+    string winTxt = winNow == 1 ? "London window" : winNow == 2 ? "New York window" : "Outside windows"
+    string trTxt  = tState == 0 ? "Flat" : tState == 1 ? "Pending " + tType : "Open " + tType
+    float  wr     = nTrades > 0 ? nWins * 100.0 / nTrades : 0.0
+    float  avgR   = nTrades > 0 ? sumR / nTrades : 0.0
+    table.cell(tb, 0, 0, "SESSION SWEEP MODEL", text_color = color.white, text_size = size.small, text_halign = text.align_left)
+    table.cell(tb, 1, 0, "v1.0", text_color = C_MUTED, text_size = size.small, text_halign = text.align_right)
+    row(tb, 1, "Profile", profName + (useLon and useNy ? " · London + NY" : useLon ? " · London" : " · New York"), color.white)
+    row(tb, 2, "Entry", entryMode, color.white)
+    row(tb, 3, "Now", winTxt, color.white)
+    row(tb, 4, "Position", trTxt, tState == 0 ? color.white : color.yellow)
+    row(tb, 5, "Trades (sim)", str.tostring(nTrades), color.white)
+    row(tb, 6, "Win rate", str.tostring(wr, "#.0") + "%", color.white)
+    row(tb, 7, "Total / avg", fmtR(sumR) + " / " + fmtR(avgR), sumR >= 0 ? color.lime : color.red)
+    row(tb, 8, "Max drawdown", "-" + str.tostring(maxDD, "#.##") + "R", color.orange)
+    row(tb, 9, "Cancelled / skipped", str.tostring(nCancel) + " / " + str.tostring(nSkip), color.white)
+    row(tb, 10, "Timeframe", tfOk ? "M5 ✓" : "Switch to M5", tfOk ? color.lime : color.red)
