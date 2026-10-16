@@ -4,6 +4,13 @@ All notable changes to this indicator are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.0.1](https://github.com/kxngHADES/Session-Sweep-Model/compare/v1.0.0...v1.0.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* plain-text alert messages, SVG icons and animated README ([#3](https://github.com/kxngHADES/Session-Sweep-Model/issues/3)) ([ddbc11a](https://github.com/kxngHADES/Session-Sweep-Model/commit/ddbc11ac21405a99b9347164701eccb0017bf041))
+
 ## [1.0.0] - 2026-10-16
 
 ### Added
